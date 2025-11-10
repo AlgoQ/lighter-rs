@@ -2,7 +2,7 @@
 
 use super::{OrderInfo, TxInfo};
 use crate::constants::*;
-use crate::errors::{LighterError, Result, FFIError};
+use crate::errors::{FFIError, LighterError, Result};
 use crate::types::common::ffisigner;
 use crate::types::common::{self, parse_result};
 use serde::{Deserialize, Serialize};
@@ -92,8 +92,17 @@ impl TxInfo for L2CreatePublicPoolTxInfo {
     }
 
     fn hash(&self) -> Result<String> {
-        // TODO: Implement Poseidon2 hashing
-        todo!()
+        // DONE: Implement Poseidon2 hashing
+        let hash_or_err = unsafe {
+            ffisigner::SignCreatePublicPool(
+                self.operator_fee,
+                self.initial_total_shares,
+                self.min_operator_share_rate,
+                self.nonce,
+            )
+        };
+
+        parse_result(hash_or_err)
     }
 }
 
