@@ -1,10 +1,12 @@
 //! Pool-related transaction types
 
-use super::TxInfo;
+use super::{OrderInfo, TxInfo};
 use crate::constants::*;
-use crate::errors::{LighterError, Result};
+use crate::errors::{LighterError, Result, FFIError};
+use crate::types::common::ffisigner;
+use crate::types::common::{self, parse_result};
 use serde::{Deserialize, Serialize};
-
+use std::ffi::{c_int, c_longlong, CStr, CString};
 /// Create Public Pool Transaction Request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreatePublicPoolTxReq {
@@ -46,8 +48,6 @@ pub struct L2CreatePublicPoolTxInfo {
     pub min_operator_share_rate: i64,
     pub expired_at: i64,
     pub nonce: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sig: Option<Vec<u8>>,
     #[serde(skip)]
     pub signed_hash: Option<String>,
 }
@@ -91,9 +91,9 @@ impl TxInfo for L2CreatePublicPoolTxInfo {
         Ok(())
     }
 
-    fn hash(&self, _lighter_chain_id: u32) -> Result<Vec<u8>> {
+    fn hash(&self) -> Result<String> {
         // TODO: Implement Poseidon2 hashing
-        Ok(vec![0u8; 40])
+        todo!()
     }
 }
 
@@ -109,8 +109,6 @@ pub struct L2UpdatePublicPoolTxInfo {
     pub expired_at: i64,
     pub nonce: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sig: Option<Vec<u8>>,
-    #[serde(skip)]
     pub signed_hash: Option<String>,
 }
 
@@ -144,9 +142,18 @@ impl TxInfo for L2UpdatePublicPoolTxInfo {
         Ok(())
     }
 
-    fn hash(&self, _lighter_chain_id: u32) -> Result<Vec<u8>> {
+    fn hash(&self) -> Result<String> {
         // TODO: Implement Poseidon2 hashing
-        Ok(vec![0u8; 40])
+        let hash_or_err = unsafe {
+            ffisigner::SignUpdatePublicPool(
+                self.public_pool_index,
+                self.status as i32,
+                self.operator_fee,
+                self.min_operator_share_rate,
+                self.nonce,
+            )
+        };
+        parse_result(hash_or_err)
     }
 }
 
@@ -160,8 +167,6 @@ pub struct L2MintSharesTxInfo {
     pub expired_at: i64,
     pub nonce: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sig: Option<Vec<u8>>,
-    #[serde(skip)]
     pub signed_hash: Option<String>,
 }
 
@@ -194,9 +199,12 @@ impl TxInfo for L2MintSharesTxInfo {
         Ok(())
     }
 
-    fn hash(&self, _lighter_chain_id: u32) -> Result<Vec<u8>> {
-        // TODO: Implement Poseidon2 hashing
-        Ok(vec![0u8; 40])
+    fn hash(&self) -> Result<String> {
+        // DONE: Implement Poseidon2 hashing
+        let hash_or_err = unsafe {
+            ffisigner::SignMintShares(self.public_pool_index, self.share_amount, self.nonce)
+        };
+        parse_result(hash_or_err)
     }
 }
 
@@ -210,8 +218,6 @@ pub struct L2BurnSharesTxInfo {
     pub expired_at: i64,
     pub nonce: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sig: Option<Vec<u8>>,
-    #[serde(skip)]
     pub signed_hash: Option<String>,
 }
 
@@ -244,9 +250,12 @@ impl TxInfo for L2BurnSharesTxInfo {
         Ok(())
     }
 
-    fn hash(&self, _lighter_chain_id: u32) -> Result<Vec<u8>> {
-        // TODO: Implement Poseidon2 hashing
-        Ok(vec![0u8; 40])
+    fn hash(&self) -> Result<String> {
+        // DONE: Implement Poseidon2 hashing
+        let hash_or_err = unsafe {
+            ffisigner::SignBurnShares(self.public_pool_index, self.share_amount, self.nonce)
+        };
+        parse_result(hash_or_err)
     }
 }
 
@@ -264,7 +273,6 @@ mod tests {
             min_operator_share_rate: 5000,
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 
@@ -282,7 +290,6 @@ mod tests {
             min_operator_share_rate: 5000,
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 
@@ -304,7 +311,6 @@ mod tests {
             min_operator_share_rate: 5000,
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 
@@ -323,7 +329,6 @@ mod tests {
             min_operator_share_rate: 5000,
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 
@@ -342,7 +347,6 @@ mod tests {
             min_operator_share_rate: 5000,
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 
@@ -363,7 +367,6 @@ mod tests {
             share_amount: 100000,
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 
@@ -380,7 +383,6 @@ mod tests {
             share_amount: 0,
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 
@@ -397,7 +399,6 @@ mod tests {
             share_amount: 100000,
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 
@@ -414,7 +415,6 @@ mod tests {
             share_amount: 0,
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 

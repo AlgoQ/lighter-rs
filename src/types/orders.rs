@@ -2,8 +2,11 @@
 
 use super::{OrderInfo, TxInfo};
 use crate::constants::*;
-use crate::errors::{LighterError, Result};
+use crate::errors::{LighterError, Result, FFIError};
+use crate::types::common::ffisigner;
+use crate::types::common::{self, parse_result};
 use serde::{Deserialize, Serialize};
+use std::ffi::{c_int, c_longlong, CStr, CString};
 
 /// Create Order Transaction Request
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,8 +32,6 @@ pub struct L2CreateOrderTxInfo {
     pub expired_at: i64,
     pub nonce: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sig: Option<Vec<u8>>,
-    #[serde(skip)]
     pub signed_hash: Option<String>,
 }
 
@@ -72,10 +73,25 @@ impl TxInfo for L2CreateOrderTxInfo {
         Ok(())
     }
 
-    fn hash(&self, _lighter_chain_id: u32) -> Result<Vec<u8>> {
-        // TODO: Implement Poseidon2 hashing
+    fn hash(&self) -> Result<String> {
+        // DONE: Implement Poseidon2 hashing
         // This should hash all fields using the Goldilocks field
-        Ok(vec![0u8; 40])
+        let hash_or_err = unsafe {
+            ffisigner::SignCreateOrder(
+                self.order_info.market_index as i32,
+                self.order_info.client_order_index as i64,
+                self.order_info.base_amount as i64,
+                self.order_info.price as i32,
+                self.order_info.is_ask as c_int,
+                self.order_info.order_type as c_int,
+                self.order_info.time_in_force as c_int,
+                self.order_info.reduce_only as c_int,
+                self.order_info.trigger_price as i32,
+                self.order_info.order_expiry as c_longlong,
+                1,
+            )
+        };
+        parse_result(hash_or_err)
     }
 }
 
@@ -143,8 +159,6 @@ pub struct L2CancelOrderTxInfo {
     pub expired_at: i64,
     pub nonce: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sig: Option<Vec<u8>>,
-    #[serde(skip)]
     pub signed_hash: Option<String>,
 }
 
@@ -174,9 +188,11 @@ impl TxInfo for L2CancelOrderTxInfo {
         Ok(())
     }
 
-    fn hash(&self, _lighter_chain_id: u32) -> Result<Vec<u8>> {
-        // TODO: Implement Poseidon2 hashing
-        Ok(vec![0u8; 40])
+    fn hash(&self) -> Result<String> {
+        // DONE: Implement Poseidon2 hashing
+        let hash_or_err =
+            unsafe { ffisigner::SignCancelOrder(self.market_index as i32, self.index, self.nonce) };
+        parse_result(hash_or_err)
     }
 }
 
@@ -193,8 +209,6 @@ pub struct L2ModifyOrderTxInfo {
     pub expired_at: i64,
     pub nonce: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sig: Option<Vec<u8>>,
-    #[serde(skip)]
     pub signed_hash: Option<String>,
 }
 
@@ -221,9 +235,19 @@ impl TxInfo for L2ModifyOrderTxInfo {
         Ok(())
     }
 
-    fn hash(&self, _lighter_chain_id: u32) -> Result<Vec<u8>> {
-        // TODO: Implement Poseidon2 hashing
-        Ok(vec![0u8; 40])
+    fn hash(&self) -> Result<String> {
+        // DONE: Implement Poseidon2 hashing
+        let hash_or_err = unsafe {
+            ffisigner::SignModifyOrder(
+                self.market_index as i32,
+                self.index as i64,
+                self.base_amount as i64,
+                self.price as i64,
+                self.trigger_price as i64,
+                self.nonce,
+            )
+        };
+        parse_result(hash_or_err)
     }
 }
 
@@ -237,8 +261,6 @@ pub struct L2CancelAllOrdersTxInfo {
     pub expired_at: i64,
     pub nonce: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sig: Option<Vec<u8>>,
-    #[serde(skip)]
     pub signed_hash: Option<String>,
 }
 
@@ -265,9 +287,12 @@ impl TxInfo for L2CancelAllOrdersTxInfo {
         Ok(())
     }
 
-    fn hash(&self, _lighter_chain_id: u32) -> Result<Vec<u8>> {
-        // TODO: Implement Poseidon2 hashing
-        Ok(vec![0u8; 40])
+    fn hash(&self) -> Result<String> {
+        // DONE: Implement Poseidon2 hashing
+        let hash_or_err = unsafe {
+            ffisigner::SignCancelAllOrders(self.time_in_force as c_int, self.time, self.nonce)
+        };
+        parse_result(hash_or_err)
     }
 }
 
@@ -281,9 +306,26 @@ pub struct L2CreateGroupedOrdersTxInfo {
     pub expired_at: i64,
     pub nonce: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sig: Option<Vec<u8>>,
-    #[serde(skip)]
     pub signed_hash: Option<String>,
+}
+
+//helper function for GroupedOrdersTxInfo
+//type conversion form the lighter-rs OrderInfo to ffisigner struct is paramount 
+impl From<common::OrderInfo> for ffisigner::CreateOrderTxReq {
+    fn from(order_info: OrderInfo) -> ffisigner::CreateOrderTxReq {
+        ffisigner::CreateOrderTxReq {
+            MarketIndex: order_info.market_index,
+            ClientOrderIndex: order_info.client_order_index,
+            BaseAmount: order_info.base_amount,
+            Price: order_info.price,
+            IsAsk: order_info.is_ask,
+            Type: order_info.order_type,
+            TimeInForce: order_info.time_in_force,
+            ReduceOnly: order_info.reduce_only,
+            TriggerPrice: order_info.trigger_price,
+            OrderExpiry: order_info.order_expiry,
+        }
+    }
 }
 
 impl TxInfo for L2CreateGroupedOrdersTxInfo {
@@ -312,9 +354,27 @@ impl TxInfo for L2CreateGroupedOrdersTxInfo {
         Ok(())
     }
 
-    fn hash(&self, _lighter_chain_id: u32) -> Result<Vec<u8>> {
-        // TODO: Implement Poseidon2 hashing
-        Ok(vec![0u8; 40])
+    fn hash(&self) -> Result<String> {
+        // DONE: Implement Poseidon2 hashing
+        // TODO: Extensive review required as the structure of the function is undesireable
+        let mut vec_createordertxreq: Vec<ffisigner::CreateOrderTxReq> = self
+            .orders
+            .clone()
+            .into_iter()
+            .map(|order_info| ffisigner::CreateOrderTxReq::from(order_info))
+            .collect();
+
+        let orders_len = vec_createordertxreq.len();
+        let orders_ptr = vec_createordertxreq.as_mut_ptr();
+        let hash_or_err = unsafe {
+            ffisigner::SignCreateGroupedOrders(
+                self.grouping_type as u8,
+                orders_ptr,
+                orders_len as i32,
+                self.nonce,
+            )
+        };
+        parse_result(hash_or_err)
     }
 }
 
@@ -345,7 +405,6 @@ mod tests {
             order_info: create_valid_order_info(),
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 
@@ -360,7 +419,6 @@ mod tests {
             order_info: create_valid_order_info(),
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 
@@ -380,7 +438,6 @@ mod tests {
             order_info: create_valid_order_info(),
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 
@@ -400,7 +457,6 @@ mod tests {
             order_info: create_valid_order_info(),
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 
@@ -423,7 +479,6 @@ mod tests {
             order_info,
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 
@@ -443,7 +498,6 @@ mod tests {
             order_info,
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 
@@ -460,7 +514,6 @@ mod tests {
             order_info: create_valid_order_info(),
             expired_at: 1000000,
             nonce: -1,
-            sig: None,
             signed_hash: None,
         };
 
@@ -477,7 +530,6 @@ mod tests {
             order_info: create_valid_order_info(),
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 
@@ -493,7 +545,6 @@ mod tests {
             index: 123456,
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 
@@ -510,7 +561,6 @@ mod tests {
             index: 123456,
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 
@@ -534,7 +584,6 @@ mod tests {
             trigger_price: 0,
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 
@@ -551,7 +600,6 @@ mod tests {
             time: 1000000,
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 
@@ -568,7 +616,6 @@ mod tests {
             orders: vec![create_valid_order_info(), create_valid_order_info()],
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 
@@ -590,7 +637,6 @@ mod tests {
             ],
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 
@@ -610,7 +656,6 @@ mod tests {
             order_info: create_valid_order_info(),
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 

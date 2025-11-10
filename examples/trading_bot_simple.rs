@@ -61,7 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &api_key,
         account_index,
         api_key_index, // api_key_index
-        304,           // 300 Testnet; 304 Mainnet
+        // 304,           // 300 Testnet; 304 Mainnet
     )?);
 
     // Flag to track if we've placed an order

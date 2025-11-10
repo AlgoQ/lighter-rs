@@ -1,6 +1,12 @@
 //! Transfer and withdrawal transaction types
 
+use super::{OrderInfo, TxInfo};
+use crate::constants::*;
+use crate::errors::{LighterError, Result, FFIError};
+use crate::types::common::ffisigner;
+use crate::types::common::{self, parse_result};
 use serde::{Deserialize, Serialize};
+use std::ffi::{c_int, c_longlong, CStr, CString};
 
 /// Transfer Transaction Request
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,10 +45,6 @@ pub struct UpdateMarginTxReq {
     pub direction: u8,
 }
 
-use super::TxInfo;
-use crate::constants::*;
-use crate::errors::{LighterError, Result};
-
 /// L2 Transfer Transaction Info
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct L2TransferTxInfo {
@@ -55,8 +57,6 @@ pub struct L2TransferTxInfo {
     pub expired_at: i64,
     pub nonce: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sig: Option<Vec<u8>>,
-    #[serde(skip)]
     pub signed_hash: Option<String>,
 }
 
@@ -96,9 +96,22 @@ impl TxInfo for L2TransferTxInfo {
         Ok(())
     }
 
-    fn hash(&self, _lighter_chain_id: u32) -> Result<Vec<u8>> {
-        // TODO: Implement Poseidon2 hashing
-        Ok(vec![0u8; 40])
+    fn hash(&self) -> Result<String> {
+        // DONE: Implement Poseidon2 hashing
+        let hash_or_err = unsafe {
+            let memo = str::from_utf8(&self.memo)
+                .map_err(|_| FFIError::Generic("Invalid memo (non UTF-8)".to_string()))?;
+            let memo =
+                CString::new(memo).map_err(|_| FFIError::Signing("Invalid memo".to_string()))?;
+            ffisigner::SignTransfer(
+                self.to_account_index,
+                self.usdc_amount,
+                self.fee,
+                memo.as_ptr() as *mut i8,
+                self.nonce,
+            )
+        };
+        parse_result(hash_or_err)
     }
 }
 
@@ -111,8 +124,6 @@ pub struct L2WithdrawTxInfo {
     pub expired_at: i64,
     pub nonce: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sig: Option<Vec<u8>>,
-    #[serde(skip)]
     pub signed_hash: Option<String>,
 }
 
@@ -146,9 +157,10 @@ impl TxInfo for L2WithdrawTxInfo {
         Ok(())
     }
 
-    fn hash(&self, _lighter_chain_id: u32) -> Result<Vec<u8>> {
-        // TODO: Implement Poseidon2 hashing
-        Ok(vec![0u8; 40])
+    fn hash(&self) -> Result<String> {
+        // DONE: Implement Poseidon2 hashing
+        let hash_or_err = unsafe { ffisigner::SignWithdraw(self.usdc_amount as i64, self.nonce) };
+        parse_result(hash_or_err)
     }
 }
 
@@ -161,8 +173,6 @@ pub struct L2ChangePubKeyTxInfo {
     pub expired_at: i64,
     pub nonce: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sig: Option<Vec<u8>>,
-    #[serde(skip)]
     pub signed_hash: Option<String>,
 }
 
@@ -192,9 +202,19 @@ impl TxInfo for L2ChangePubKeyTxInfo {
         Ok(())
     }
 
-    fn hash(&self, _lighter_chain_id: u32) -> Result<Vec<u8>> {
-        // TODO: Implement Poseidon2 hashing
-        Ok(vec![0u8; 40])
+    fn hash(&self) -> Result<String> {
+        // DONE: Implement Poseidon2 hashing
+
+        if let Ok(new_pubk) = String::from_utf8(self.pub_key.clone()) {
+            let c_pubkey =
+                CString::new(new_pubk).map_err(|_| FFIError::Signing("Invalid key".to_string()))?;
+
+            let hash_or_err =
+                unsafe { ffisigner::SignChangePubKey(c_pubkey.as_ptr() as *mut i8, self.nonce) };
+            return parse_result(hash_or_err);
+        } else {
+            return Err(FFIError::Signing("Invalid key".to_string()).into());
+        };
     }
 }
 
@@ -205,11 +225,10 @@ pub struct L2UpdateLeverageTxInfo {
     pub api_key_index: u8,
     pub market_index: u8,
     pub initial_margin_fraction: u16,
+    pub margin_mode: u8,
     pub expired_at: i64,
     pub nonce: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sig: Option<Vec<u8>>,
-    #[serde(skip)]
     pub signed_hash: Option<String>,
 }
 
@@ -244,9 +263,18 @@ impl TxInfo for L2UpdateLeverageTxInfo {
         Ok(())
     }
 
-    fn hash(&self, _lighter_chain_id: u32) -> Result<Vec<u8>> {
-        // TODO: Implement Poseidon2 hashing
-        Ok(vec![0u8; 40])
+    fn hash(&self) -> Result<String> {
+        // DONE: Implement Poseidon2 hashing
+        let hash_or_err = unsafe {
+            ffisigner::SignUpdateLeverage(
+                self.market_index as i32,
+                self.initial_margin_fraction as i32,
+                self.margin_mode as i32,
+                self.nonce as i64,
+            )
+        };
+
+        parse_result(hash_or_err)
     }
 }
 
@@ -261,8 +289,6 @@ pub struct L2UpdateMarginTxInfo {
     pub expired_at: i64,
     pub nonce: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sig: Option<Vec<u8>>,
-    #[serde(skip)]
     pub signed_hash: Option<String>,
 }
 
@@ -296,9 +322,18 @@ impl TxInfo for L2UpdateMarginTxInfo {
         Ok(())
     }
 
-    fn hash(&self, _lighter_chain_id: u32) -> Result<Vec<u8>> {
-        // TODO: Implement Poseidon2 hashing
-        Ok(vec![0u8; 40])
+    fn hash(&self) -> Result<String> {
+        // DONE: Implement Poseidon2 hashing
+        let hash_or_err = unsafe {
+            ffisigner::SignUpdateMargin(
+                self.market_index as i32,
+                self.usdc_amount as i64,
+                self.direction as i32,
+                self.nonce as i64,
+            )
+        };
+
+        parse_result(hash_or_err)
     }
 }
 
@@ -310,8 +345,6 @@ pub struct L2CreateSubAccountTxInfo {
     pub expired_at: i64,
     pub nonce: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sig: Option<Vec<u8>>,
-    #[serde(skip)]
     pub signed_hash: Option<String>,
 }
 
@@ -338,9 +371,11 @@ impl TxInfo for L2CreateSubAccountTxInfo {
         Ok(())
     }
 
-    fn hash(&self, _lighter_chain_id: u32) -> Result<Vec<u8>> {
-        // TODO: Implement Poseidon2 hashing
-        Ok(vec![0u8; 40])
+    fn hash(&self) -> Result<String> {
+        // DONE: Implement Poseidon2 hashing
+        let hash_or_err = unsafe { ffisigner::SignCreateSubAccount(self.nonce) };
+        
+        parse_result(hash_or_err)
     }
 }
 
@@ -359,7 +394,6 @@ mod tests {
             memo: [0u8; 32],
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 
@@ -378,7 +412,6 @@ mod tests {
             memo: [0u8; 32],
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 
@@ -397,7 +430,6 @@ mod tests {
             memo: [0u8; 32],
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 
@@ -417,7 +449,6 @@ mod tests {
             usdc_amount: 1000000,
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 
@@ -433,7 +464,6 @@ mod tests {
             pub_key: vec![0u8; 40],
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 
@@ -449,7 +479,6 @@ mod tests {
             pub_key: vec![0u8; 20],
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 
@@ -465,9 +494,9 @@ mod tests {
             api_key_index: 0,
             market_index: 0,
             initial_margin_fraction: 5000,
+            margin_mode: 0,
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 
@@ -485,7 +514,6 @@ mod tests {
             direction: MARGIN_ADD_TO_ISOLATED,
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 
@@ -503,7 +531,6 @@ mod tests {
             direction: 2,
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 
@@ -522,7 +549,6 @@ mod tests {
             api_key_index: 0,
             expired_at: 1000000,
             nonce: 1,
-            sig: None,
             signed_hash: None,
         };
 

@@ -39,11 +39,19 @@ chrono = "0.4"
 num-bigint = "0.4"
 num-traits = "0.2"
 dotenv = "0.15"
+secrecy = "0.10.3"
+alloy = "1.1.0"
+libc = "0.2.177"
+tracing = "0.1.41"
 
 [dev-dependencies]
 tokio-test = "0.4"
 mockito = "1.0"
 dotenv = "0.15"
+
+[build-dependencies]
+bindgen = "0.72.1"
+
 
 [lib]
 name = "lighter_rs"

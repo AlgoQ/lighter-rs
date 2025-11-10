@@ -5,9 +5,10 @@ use serde::Deserialize;
 use std::time::Duration;
 
 use crate::constants::*;
-use crate::errors::{LighterError, Result};
-use crate::signer::{PoseidonKeyManager, Signer};
+use crate::errors::{LighterError, Result, FFIError};
 use crate::types::*;
+use std::ffi::{c_int, c_longlong, CStr, CString};
+use std::sync::{Arc, RwLock};
 
 /// HTTP Client for Lighter API
 #[derive(Clone)]
@@ -110,9 +111,9 @@ pub struct TxResponse {
 
 /// Transaction Client for signing and submitting transactions
 pub struct TxClient {
-    api_client: Option<HTTPClient>,
-    chain_id: u32,
-    key_manager: PoseidonKeyManager,
+    api_client: Option<HTTPClient>,  //constructed from client_url
+    private_key: String,
+    chain_id: u32,  //determined by url type
     account_index: i64,
     api_key_index: u8,
 }
@@ -125,15 +126,15 @@ impl TxClient {
     /// * `api_key_private_key` - Hex-encoded private key (with or without 0x prefix)
     /// * `account_index` - Account index
     /// * `api_key_index` - API key index
-    /// * `chain_id` - Chain ID
+  
     pub fn new(
         api_client_url: &str,
         api_key_private_key: &str,
         account_index: i64,
         api_key_index: u8,
-        chain_id: u32,
+        //chain_id: u32,
     ) -> Result<Self> {
-        let key_manager = PoseidonKeyManager::from_hex(api_key_private_key)?;
+        let private_key = api_key_private_key.to_string();
 
         let api_client = if !api_client_url.is_empty() {
             Some(HTTPClient::new(api_client_url)?)
@@ -141,10 +142,34 @@ impl TxClient {
             None
         };
 
+        let chain_id = if api_client_url.contains("mainnet") { 304 } else { 300 };
+
+        unsafe { // extern char* CheckClient(int cApiKeyIndex, long long int cAccountIndex);
+            let c_url = CString::new(api_client_url)
+                .map_err(|_| FFIError::Signing("Invalid URL".to_string()))?;
+            let c_key = CString::new(api_key_private_key)
+                .map_err(|_| FFIError::Signing("Invalid key".to_string()))?;
+
+            let res = ffisigner::CreateClient(
+                c_url.as_ptr() as *mut i8,
+                c_key.as_ptr() as *mut i8,
+                chain_id as c_int,
+                api_key_index as c_int,
+                account_index as c_longlong,
+            );
+
+            if !res.is_null() {
+                let err_str = CStr::from_ptr(res).to_string_lossy().to_string();
+                libc::free(res as *mut libc::c_void);
+                return Err(FFIError::Signing(err_str).into());
+            }
+
+        }
+
         Ok(Self {
             api_client,
             chain_id,
-            key_manager,
+            private_key,
             account_index,
             api_key_index,
         })
@@ -161,8 +186,8 @@ impl TxClient {
     }
 
     /// Get a reference to the key manager
-    pub fn key_manager(&self) -> &PoseidonKeyManager {
-        &self.key_manager
+    pub fn private_key(&self) -> &String {
+        &self.private_key
     }
 
     /// Get a reference to the HTTP client
@@ -237,7 +262,6 @@ impl TxClient {
             },
             expired_at: opts.expired_at,
             nonce: opts.nonce.unwrap(),
-            sig: None,
             signed_hash: None,
         };
 
@@ -245,11 +269,7 @@ impl TxClient {
         tx_info.validate()?;
 
         // Hash and sign
-        let msg_hash = tx_info.hash(self.chain_id)?;
-        let signature = self.key_manager.sign(&msg_hash)?;
-
-        tx_info.sig = Some(signature);
-        tx_info.signed_hash = Some(hex::encode(&msg_hash));
+        tx_info.signed_hash = Some(tx_info.hash()?);
 
         Ok(tx_info)
     }
@@ -269,15 +289,12 @@ impl TxClient {
             index: req.index,
             expired_at: opts.expired_at,
             nonce: opts.nonce.unwrap(),
-            sig: None,
             signed_hash: None,
         };
 
         tx_info.validate()?;
-        let msg_hash = tx_info.hash(self.chain_id)?;
-        let signature = self.key_manager.sign(&msg_hash)?;
-        tx_info.sig = Some(signature);
-        tx_info.signed_hash = Some(hex::encode(&msg_hash));
+
+        tx_info.signed_hash = Some(tx_info.hash()?);
 
         Ok(tx_info)
     }
@@ -300,15 +317,12 @@ impl TxClient {
             trigger_price: req.trigger_price,
             expired_at: opts.expired_at,
             nonce: opts.nonce.unwrap(),
-            sig: None,
             signed_hash: None,
         };
 
         tx_info.validate()?;
-        let msg_hash = tx_info.hash(self.chain_id)?;
-        let signature = self.key_manager.sign(&msg_hash)?;
-        tx_info.sig = Some(signature);
-        tx_info.signed_hash = Some(hex::encode(&msg_hash));
+
+        tx_info.signed_hash = Some(tx_info.hash()?);
 
         Ok(tx_info)
     }
@@ -328,15 +342,12 @@ impl TxClient {
             time: req.time,
             expired_at: opts.expired_at,
             nonce: opts.nonce.unwrap(),
-            sig: None,
             signed_hash: None,
         };
 
         tx_info.validate()?;
-        let msg_hash = tx_info.hash(self.chain_id)?;
-        let signature = self.key_manager.sign(&msg_hash)?;
-        tx_info.sig = Some(signature);
-        tx_info.signed_hash = Some(hex::encode(&msg_hash));
+        
+        tx_info.signed_hash = Some(tx_info.hash()?);
 
         Ok(tx_info)
     }
@@ -373,15 +384,12 @@ impl TxClient {
             orders,
             expired_at: opts.expired_at,
             nonce: opts.nonce.unwrap(),
-            sig: None,
             signed_hash: None,
         };
 
         tx_info.validate()?;
-        let msg_hash = tx_info.hash(self.chain_id)?;
-        let signature = self.key_manager.sign(&msg_hash)?;
-        tx_info.sig = Some(signature);
-        tx_info.signed_hash = Some(hex::encode(&msg_hash));
+        
+        tx_info.signed_hash = Some(tx_info.hash()?);
 
         Ok(tx_info)
     }
@@ -403,15 +411,12 @@ impl TxClient {
             memo: req.memo,
             expired_at: opts.expired_at,
             nonce: opts.nonce.unwrap(),
-            sig: None,
             signed_hash: None,
         };
 
         tx_info.validate()?;
-        let msg_hash = tx_info.hash(self.chain_id)?;
-        let signature = self.key_manager.sign(&msg_hash)?;
-        tx_info.sig = Some(signature);
-        tx_info.signed_hash = Some(hex::encode(&msg_hash));
+        
+        tx_info.signed_hash = Some(tx_info.hash()?);
 
         Ok(tx_info)
     }
@@ -430,15 +435,12 @@ impl TxClient {
             usdc_amount: req.usdc_amount,
             expired_at: opts.expired_at,
             nonce: opts.nonce.unwrap(),
-            sig: None,
             signed_hash: None,
         };
 
         tx_info.validate()?;
-        let msg_hash = tx_info.hash(self.chain_id)?;
-        let signature = self.key_manager.sign(&msg_hash)?;
-        tx_info.sig = Some(signature);
-        tx_info.signed_hash = Some(hex::encode(&msg_hash));
+        
+        tx_info.signed_hash = Some(tx_info.hash()?);
 
         Ok(tx_info)
     }
@@ -457,15 +459,12 @@ impl TxClient {
             pub_key: req.pub_key.clone(),
             expired_at: opts.expired_at,
             nonce: opts.nonce.unwrap(),
-            sig: None,
             signed_hash: None,
         };
 
         tx_info.validate()?;
-        let msg_hash = tx_info.hash(self.chain_id)?;
-        let signature = self.key_manager.sign(&msg_hash)?;
-        tx_info.sig = Some(signature);
-        tx_info.signed_hash = Some(hex::encode(&msg_hash));
+        
+        tx_info.signed_hash = Some(tx_info.hash()?);
 
         Ok(tx_info)
     }
@@ -483,17 +482,15 @@ impl TxClient {
             api_key_index: opts.api_key_index.unwrap(),
             market_index: req.market_index,
             initial_margin_fraction: req.initial_margin_fraction,
+            margin_mode: req.margin_mode,
             expired_at: opts.expired_at,
             nonce: opts.nonce.unwrap(),
-            sig: None,
             signed_hash: None,
         };
 
         tx_info.validate()?;
-        let msg_hash = tx_info.hash(self.chain_id)?;
-        let signature = self.key_manager.sign(&msg_hash)?;
-        tx_info.sig = Some(signature);
-        tx_info.signed_hash = Some(hex::encode(&msg_hash));
+        
+        tx_info.signed_hash = Some(tx_info.hash()?);
 
         Ok(tx_info)
     }
@@ -514,15 +511,12 @@ impl TxClient {
             direction: req.direction,
             expired_at: opts.expired_at,
             nonce: opts.nonce.unwrap(),
-            sig: None,
             signed_hash: None,
         };
 
         tx_info.validate()?;
-        let msg_hash = tx_info.hash(self.chain_id)?;
-        let signature = self.key_manager.sign(&msg_hash)?;
-        tx_info.sig = Some(signature);
-        tx_info.signed_hash = Some(hex::encode(&msg_hash));
+        
+        tx_info.signed_hash = Some(tx_info.hash()?);
 
         Ok(tx_info)
     }
@@ -539,15 +533,12 @@ impl TxClient {
             api_key_index: opts.api_key_index.unwrap(),
             expired_at: opts.expired_at,
             nonce: opts.nonce.unwrap(),
-            sig: None,
             signed_hash: None,
         };
 
         tx_info.validate()?;
-        let msg_hash = tx_info.hash(self.chain_id)?;
-        let signature = self.key_manager.sign(&msg_hash)?;
-        tx_info.sig = Some(signature);
-        tx_info.signed_hash = Some(hex::encode(&msg_hash));
+        
+        tx_info.signed_hash = Some(tx_info.hash()?);
 
         Ok(tx_info)
     }
@@ -568,15 +559,12 @@ impl TxClient {
             min_operator_share_rate: req.min_operator_share_rate,
             expired_at: opts.expired_at,
             nonce: opts.nonce.unwrap(),
-            sig: None,
             signed_hash: None,
         };
 
         tx_info.validate()?;
-        let msg_hash = tx_info.hash(self.chain_id)?;
-        let signature = self.key_manager.sign(&msg_hash)?;
-        tx_info.sig = Some(signature);
-        tx_info.signed_hash = Some(hex::encode(&msg_hash));
+        
+        tx_info.signed_hash = Some(tx_info.hash()?);
 
         Ok(tx_info)
     }
@@ -598,15 +586,12 @@ impl TxClient {
             min_operator_share_rate: req.min_operator_share_rate,
             expired_at: opts.expired_at,
             nonce: opts.nonce.unwrap(),
-            sig: None,
             signed_hash: None,
         };
 
         tx_info.validate()?;
-        let msg_hash = tx_info.hash(self.chain_id)?;
-        let signature = self.key_manager.sign(&msg_hash)?;
-        tx_info.sig = Some(signature);
-        tx_info.signed_hash = Some(hex::encode(&msg_hash));
+        
+        tx_info.signed_hash = Some(tx_info.hash()?);
 
         Ok(tx_info)
     }
@@ -626,15 +611,12 @@ impl TxClient {
             share_amount: req.share_amount,
             expired_at: opts.expired_at,
             nonce: opts.nonce.unwrap(),
-            sig: None,
             signed_hash: None,
         };
 
         tx_info.validate()?;
-        let msg_hash = tx_info.hash(self.chain_id)?;
-        let signature = self.key_manager.sign(&msg_hash)?;
-        tx_info.sig = Some(signature);
-        tx_info.signed_hash = Some(hex::encode(&msg_hash));
+        
+        tx_info.signed_hash = Some(tx_info.hash()?);
 
         Ok(tx_info)
     }
@@ -654,15 +636,12 @@ impl TxClient {
             share_amount: req.share_amount,
             expired_at: opts.expired_at,
             nonce: opts.nonce.unwrap(),
-            sig: None,
             signed_hash: None,
         };
 
         tx_info.validate()?;
-        let msg_hash = tx_info.hash(self.chain_id)?;
-        let signature = self.key_manager.sign(&msg_hash)?;
-        tx_info.sig = Some(signature);
-        tx_info.signed_hash = Some(hex::encode(&msg_hash));
+        
+        tx_info.signed_hash = Some(tx_info.hash()?);
 
         Ok(tx_info)
     }

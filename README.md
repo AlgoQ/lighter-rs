@@ -200,6 +200,8 @@ The following functions require actual implementation:
 - `PoseidonKeyManager::sign()` - Schnorr signature generation
 - Transaction hashing functions - Poseidon2 hash over Goldilocks field
 
+- Integration achieved by Librecrate with removed redundancy
+
 ### Chain ID
 
 Make sure to use the correct chain ID for your environment:
@@ -234,3 +236,10 @@ MIT License - see LICENSE file for details
 For issues and questions:
 - GitHub Issues: [lighter-rs/issues](https://github.com/elliottech/lighter-rs/issues)
 - Lighter Discord: [Join Discord](https://discord.gg/lighter)
+
+
+## UPDATE
+Default hash is now String
+removed chained id from each function: now infers from url
+removed sig function as it is now redundant: signed_hash will hold a generated hash
+fixed: mismatch between L2UpdateLeverageTxInfo and UpdateLeverageTxReq missing margin_mode u8

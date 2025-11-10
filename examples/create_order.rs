@@ -27,7 +27,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &private_key,
         account_index,
         api_key_index,
-        304, // 304 = Mainnet, 300 = Testnet
+         // 304 = Mainnet, 300 = Testnet
     )?;
 
     let market_index = 0u8; // Market 0 = ETH

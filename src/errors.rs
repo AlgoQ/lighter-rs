@@ -352,3 +352,26 @@ impl From<&str> for LighterError {
         LighterError::Other(s.to_string())
     }
 }
+
+
+#[derive(Error, Debug)]
+pub enum FFIError {
+    #[error("Signing error: {0}")]
+    Signing(String),
+
+    #[error("Invalid nonce: {0}")]
+    Nonce(String),
+
+    #[error("Unknown error: {0}")]
+    Unknown(String),
+
+    #[error("Generic error: {0}")]
+    Generic(String),
+}
+
+
+impl From<FFIError> for LighterError {
+    fn from(s: FFIError) -> Self {
+        LighterError::Other(s.to_string())
+    }
+}

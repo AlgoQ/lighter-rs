@@ -56,7 +56,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &api_key,
         account_index,
         api_key_index,
-        chain_id,
+        // chain_id,
     )?;
 
     println!("✓ Connected to Lighter Testnet\n");

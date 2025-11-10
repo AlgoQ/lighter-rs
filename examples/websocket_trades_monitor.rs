@@ -58,7 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &api_key,
         account_index,
         0,
-        chain_id,
+        // chain_id,
     )?);
 
     println!("✓ Trading client initialized\n");

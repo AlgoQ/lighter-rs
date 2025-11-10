@@ -42,7 +42,6 @@
 pub mod client;
 pub mod constants;
 pub mod errors;
-pub mod signer;
 pub mod types;
 pub mod utils;
 pub mod ws_client;
@@ -51,7 +50,6 @@ pub mod ws_client;
 pub use client::TxResponse;
 pub use constants::*;
 pub use errors::{LighterError, Result};
-pub use signer::{KeyManager, Signer};
 pub use types::{TransactOpts, TxInfo};
 
 /// Library version

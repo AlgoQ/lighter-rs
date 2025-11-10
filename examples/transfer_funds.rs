@@ -17,7 +17,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
         12345, // From account index
         0,     // API key index
-        1,     // Chain ID
+        // 1,     // Chain ID
     )?;
 
     println!("✓ Transaction client initialized");
