@@ -239,7 +239,7 @@ For issues and questions:
 
 
 ## UPDATE
-Default hash is now String
-removed chained id from each function: now infers from url
-removed sig function as it is now redundant: signed_hash will hold a generated hash
-fixed: mismatch between L2UpdateLeverageTxInfo and UpdateLeverageTxReq missing margin_mode u8
+- Default hash is now String
+- removed chained id from each function: now infers from url
+- removed sig function as it is now redundant: signed_hash will hold a generated hash
+- fixed: mismatch between L2UpdateLeverageTxInfo and UpdateLeverageTxReq missing margin_mode u8
