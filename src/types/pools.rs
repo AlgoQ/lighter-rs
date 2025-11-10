@@ -152,7 +152,7 @@ impl TxInfo for L2UpdatePublicPoolTxInfo {
     }
 
     fn hash(&self) -> Result<String> {
-        // TODO: Implement Poseidon2 hashing
+        // DONE: Implement Poseidon2 hashing
         let hash_or_err = unsafe {
             ffisigner::SignUpdatePublicPool(
                 self.public_pool_index,
