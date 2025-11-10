@@ -310,7 +310,7 @@ pub struct L2CreateGroupedOrdersTxInfo {
 }
 
 //helper function for GroupedOrdersTxInfo
-//type conversion form the lighter-rs OrderInfo to ffisigner struct is paramount 
+//type conversion form the lighter-rs OrderInfo to ffisigner struct is required 
 impl From<common::OrderInfo> for ffisigner::CreateOrderTxReq {
     fn from(order_info: OrderInfo) -> ffisigner::CreateOrderTxReq {
         ffisigner::CreateOrderTxReq {
@@ -356,6 +356,7 @@ impl TxInfo for L2CreateGroupedOrdersTxInfo {
 
     fn hash(&self) -> Result<String> {
         // DONE: Implement Poseidon2 hashing
+        // Explicit convertion to destination data structure is needed for the possible future compatibility
         // TODO: Extensive review required as the structure of the function is undesireable
         let mut vec_createordertxreq: Vec<ffisigner::CreateOrderTxReq> = self
             .orders

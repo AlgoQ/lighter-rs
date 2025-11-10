@@ -29,7 +29,7 @@
 //!     "your_api_key_hex",
 //!     12345,  // account_index
 //!     0,      // api_key_index
-//!     1,      // chain_id
+//!     //1,      // chain_id
 //! )?;
 //!
 //! // Create and submit an order
