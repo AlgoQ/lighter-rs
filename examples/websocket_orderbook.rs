@@ -17,7 +17,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create WebSocket client
     let client = WsClient::builder()
-        .host("api-testnet.lighter.xyz")
+        .host("mainnet.zklighter.elliot.ai")
         .order_books(vec![0, 1]) // Subscribe to markets 0 and 1
         .build()?;
 
@@ -65,15 +65,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("\n{}\n", "─".repeat(50));
     };
 
-    // Placeholder for account updates (not used in this example)
+    // Placeholders for other callbacks (not used in this example)
+    let on_trade_update = |_market_id: String, _trades: Vec<lighter_rs::ws_client::TradeData>| {};
     let on_account_update = |_account_id: String, _account_data: serde_json::Value| {};
+    let on_user_stats_update = |_account_id: String, _stats: serde_json::Value| {};
 
     println!("Starting WebSocket stream...");
     println!("Press Ctrl+C to stop\n");
     println!("{}\n", "═".repeat(50));
 
     // Run the WebSocket client
-    client.run(on_order_book_update, on_account_update).await?;
+    client.run(on_order_book_update, on_trade_update, on_account_update, on_user_stats_update).await?;
 
     Ok(())
 }

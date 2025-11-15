@@ -8,9 +8,10 @@
 //! This is a simple example for educational purposes.
 //! DO NOT use in production without proper risk management!
 //!
-//! Prerequisites:
+//! Prerequisites - .env file:
 //! - Set LIGHTER_API_KEY
 //! - Set LIGHTER_ACCOUNT_INDEX
+//! - Set LIGHTER_API_KEY_INDEX
 //!
 //! Run with: cargo run --example trading_bot_simple
 
@@ -28,6 +29,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("║   WARNING: Educational purposes only!             ║");
     println!("╚═══════════════════════════════════════════════════╝\n");
 
+    // Load .env file
+    dotenv::dotenv().ok();
+
     // Load configuration
     let api_key = env::var("LIGHTER_API_KEY")
         .expect("LIGHTER_API_KEY environment variable not set");
@@ -37,8 +41,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parse()
         .expect("LIGHTER_ACCOUNT_INDEX must be a valid number");
 
-    let market_index = 0u8; // Trading on market 0
-    let testnet_url = "https://api-testnet.lighter.xyz";
+    let api_key_index: u8 = env::var("LIGHTER_API_KEY_INDEX")
+        .expect("LIGHTER_ACCOUNT_INDEX environment variable not set")
+        .parse()
+        .expect("LIGHTER_ACCOUNT_INDEX must be a valid number");
+
+    let market_index = 0u8; // Trading on market 0 -> ETH
+    let url = "https://mainnet.zklighter.elliot.ai";
+    let url_ws = "mainnet.zklighter.elliot.ai";
 
     println!("Bot Configuration:");
     println!("  Account: {}", account_index);
@@ -47,11 +57,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create trading client
     let tx_client = Arc::new(TxClient::new(
-        testnet_url,
+        url,
         &api_key,
         account_index,
-        0,
-        300, // Testnet chain ID
+        api_key_index, // api_key_index
+        304, // 300 Testnet; 304 Mainnet
     )?);
 
     // Flag to track if we've placed an order
@@ -61,7 +71,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create WebSocket client
     let ws_client = WsClient::builder()
-        .host("api-testnet.lighter.xyz")
+        .host(url_ws)
         .order_books(vec![market_index as u32])
         .accounts(vec![account_index])
         .build()?;

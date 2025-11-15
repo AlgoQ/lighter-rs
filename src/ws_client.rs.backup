@@ -2,14 +2,8 @@
 //!
 //! This module provides WebSocket connectivity to subscribe to:
 //! - Order book updates
-//! - Trade updates
 //! - Account updates
-//! - User stats updates
-//!
-//! Features:
-//! - Automatic ping/pong handling for connection keep-alive
-//! - Proper error logging and connection state management
-//! - Multiple subscription types in a single connection
+//! - Real-time trading data
 
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -72,11 +66,15 @@ pub struct PriceLevel {
 pub struct TradeData {
     pub price: String,
     pub size: String,
-    #[serde(rename = "is_maker_ask")]
-    pub is_maker_ask: bool,
-    pub market_id: u32,
-    #[serde(default)]
-    pub block_height: Option<u64>,
+    #[serde(rename = "isBuyerMaker")]
+    pub is_buyer_maker: bool,
+    pub timestamp: i64,
+}
+
+/// User stats data structure
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserStats {
+    pub stats: Value,
 }
 
 /// WebSocket client configuration
@@ -231,7 +229,7 @@ impl WsClient {
             LighterError::InvalidConfiguration(format!("WebSocket connection failed: {}", e))
         })?;
 
-        eprintln!("✓ Lighter WebSocket connected to {}", self.base_url);
+        println!("✓ WebSocket connected to {}", self.base_url);
 
         let (mut write, mut read) = ws_stream.split();
 
@@ -258,188 +256,91 @@ impl WsClient {
 
             match message {
                 Message::Text(text) => {
-                    eprintln!("[Lighter WS] Raw text message: {}", text);
-                    let parsed: Value = serde_json::from_str(&text)?;
-                    let msg_type = parsed.get("type").and_then(|t| t.as_str());
+                let parsed: Value = serde_json::from_str(&text)?;
+                let msg_type = parsed.get("type").and_then(|t| t.as_str());
 
-                    match msg_type {
-                        Some("ping") => {
-                            eprintln!("[Lighter WS] Received 'ping' text message, sending 'pong' text response");
-                            let pong_msg = serde_json::json!({
-                                "type": "pong"
-                            });
-                            write.send(Message::Text(serde_json::to_string(&pong_msg)?)).await.map_err(|e| {
-                                LighterError::InvalidResponse(format!("Failed to send pong text: {}", e))
+                match msg_type {
+                    Some("connected") => {
+                        println!("✓ WebSocket connection established");
+                        // Send subscriptions
+                        for market_id in &order_book_ids {
+                            let sub_msg = SubscribeMessage {
+                                msg_type: "subscribe".to_string(),
+                                channel: format!("order_book/{}", market_id),
+                            };
+                            let json = serde_json::to_string(&sub_msg)?;
+                            write.send(Message::Text(json)).await.map_err(|e| {
+                                LighterError::InvalidResponse(format!("Send error: {}", e))
                             })?;
+                            println!("  → Subscribed to order_book/{}", market_id);
                         }
-                        Some("connected") => {
-                            eprintln!("✓ Lighter WebSocket connection established");
 
-                            // Send order book subscriptions
-                            for market_id in &order_book_ids {
-                                let sub_msg = SubscribeMessage {
-                                    msg_type: "subscribe".to_string(),
-                                    channel: format!("order_book/{}", market_id),
-                                };
-                                let json = serde_json::to_string(&sub_msg)?;
-                                write.send(Message::Text(json)).await.map_err(|e| {
-                                    LighterError::InvalidResponse(format!("Send error: {}", e))
-                                })?;
-                                eprintln!("  → Subscribed to order_book/{}", market_id);
-                            }
-
-                            // Send trade subscriptions
-                            for market_id in &trade_ids {
-                                let sub_msg = SubscribeMessage {
-                                    msg_type: "subscribe".to_string(),
-                                    channel: format!("trade/{}", market_id),
-                                };
-                                let json = serde_json::to_string(&sub_msg)?;
-                                write.send(Message::Text(json)).await.map_err(|e| {
-                                    LighterError::InvalidResponse(format!("Send error: {}", e))
-                                })?;
-                                eprintln!("  → Subscribed to trade/{}", market_id);
-                            }
-
-                            // Send account subscriptions
-                            for account_id in &account_ids {
-                                let sub_msg = SubscribeMessage {
-                                    msg_type: "subscribe".to_string(),
-                                    channel: format!("account_all/{}", account_id),
-                                };
-                                let json = serde_json::to_string(&sub_msg)?;
-                                write.send(Message::Text(json)).await.map_err(|e| {
-                                    LighterError::InvalidResponse(format!("Send error: {}", e))
-                                })?;
-                                eprintln!("  → Subscribed to account_all/{}", account_id);
-                            }
-
-                            // Send user stats subscriptions
-                            for account_id in &user_stats_ids {
-                                let sub_msg = SubscribeMessage {
-                                    msg_type: "subscribe".to_string(),
-                                    channel: format!("user_stats/{}", account_id),
-                                };
-                                let json = serde_json::to_string(&sub_msg)?;
-                                write.send(Message::Text(json)).await.map_err(|e| {
-                                    LighterError::InvalidResponse(format!("Send error: {}", e))
-                                })?;
-                                eprintln!("  → Subscribed to user_stats/{}", account_id);
-                            }
+                        for account_id in &account_ids {
+                            let sub_msg = SubscribeMessage {
+                                msg_type: "subscribe".to_string(),
+                                channel: format!("account_all/{}", account_id),
+                            };
+                            let json = serde_json::to_string(&sub_msg)?;
+                            write.send(Message::Text(json)).await.map_err(|e| {
+                                LighterError::InvalidResponse(format!("Send error: {}", e))
+                            })?;
+                            println!("  → Subscribed to account_all/{}", account_id);
                         }
-                        Some("subscribed/order_book") => {
+                    }
+                    Some("subscribed/order_book") => {
+                        if let Some(channel) = parsed.get("channel").and_then(|c| c.as_str()) {
+                            let market_id = channel.split(':').nth(1).unwrap_or("unknown");
                             if let Some(order_book) = parsed.get("order_book") {
                                 let ob: OrderBook = serde_json::from_value(order_book.clone())?;
-                                // Extract market ID from the parsed message
-                                let market_id = parsed.get("channel")
-                                    .and_then(|c| c.as_str())
-                                    .and_then(|s| s.split('/').nth(1))
-                                    .unwrap_or("unknown")
-                                    .to_string();
-
                                 order_book_states
                                     .write()
                                     .await
-                                    .insert(market_id.clone(), ob.clone());
-                                on_order_book_update(market_id, ob);
+                                    .insert(market_id.to_string(), ob.clone());
+                                on_order_book_update(market_id.to_string(), ob);
                             }
                         }
-                        Some("update/order_book") => {
+                    }
+                    Some("update/order_book") => {
+                        if let Some(channel) = parsed.get("channel").and_then(|c| c.as_str()) {
+                            let market_id = channel.split(':').nth(1).unwrap_or("unknown");
                             if let Some(update) = parsed.get("order_book") {
-                                let market_id = parsed.get("channel")
-                                    .and_then(|c| c.as_str())
-                                    .and_then(|s| s.split('/').nth(1))
-                                    .unwrap_or("unknown")
-                                    .to_string();
-
                                 let mut states = order_book_states.write().await;
-                                if let Some(existing) = states.get_mut(&market_id) {
+                                if let Some(existing) = states.get_mut(market_id) {
                                     // Update order book state
                                     Self::update_order_book_state(existing, update)?;
-                                    on_order_book_update(market_id, existing.clone());
+                                    on_order_book_update(market_id.to_string(), existing.clone());
                                 }
                             }
                         }
-                        Some("subscribed/trade") | Some("update/trade") => {
-                            if let Some(trades_data) = parsed.get("trades") {
-                                let trades: Vec<TradeData> = serde_json::from_value(trades_data.clone())?;
-                                let market_id = parsed.get("channel")
-                                    .and_then(|c| c.as_str())
-                                    .and_then(|s| s.split('/').nth(1))
-                                    .unwrap_or("unknown")
-                                    .to_string();
-
-                                trade_states
-                                    .write()
-                                    .await
-                                    .insert(market_id.clone(), trades.clone());
-                                on_trade_update(market_id, trades);
-                            }
-                        }
-                        Some("subscribed/account_all") | Some("update/account_all") => {
-                            let account_id = parsed.get("channel")
-                                .and_then(|c| c.as_str())
-                                .and_then(|s| s.split('/').nth(1))
-                                .unwrap_or("unknown")
-                                .to_string();
-
+                    }
+                    Some("subscribed/account_all") => {
+                        if let Some(channel) = parsed.get("channel").and_then(|c| c.as_str()) {
+                            let account_id = channel.split(':').nth(1).unwrap_or("unknown");
                             account_states
                                 .write()
                                 .await
-                                .insert(account_id.clone(), parsed.clone());
-                            on_account_update(account_id, parsed);
-                        }
-                        Some("subscribed/user_stats") | Some("update/user_stats") => {
-                            if let Some(stats) = parsed.get("stats") {
-                                let account_id = parsed.get("channel")
-                                    .and_then(|c| c.as_str())
-                                    .and_then(|s| s.split('/').nth(1))
-                                    .unwrap_or("unknown")
-                                    .to_string();
-
-                                user_stats_states
-                                    .write()
-                                    .await
-                                    .insert(account_id.clone(), stats.clone());
-                                on_user_stats_update(account_id, stats.clone());
-                            }
-                        }
-                        _ => {
-                            eprintln!("[Lighter WS] Unhandled message type: {:?}", msg_type);
+                                .insert(account_id.to_string(), parsed.clone());
+                            on_account_update(account_id.to_string(), parsed);
                         }
                     }
-                }
-                Message::Ping(payload) => {
-                    eprintln!("[Lighter WS] Received WebSocket Ping frame");
-                    eprintln!("  → Payload (bytes): {:?}", payload);
-                    eprintln!("  → Payload (UTF-8): {:?}", String::from_utf8(payload.clone()));
-                    eprintln!("  → Sending Pong response");
-                    write
-                        .send(Message::Pong(payload))
-                        .await
-                        .map_err(|e| LighterError::InvalidResponse(format!("Failed to send Pong: {}", e)))?;
-                }
-                Message::Pong(payload) => {
-                    eprintln!("[Lighter WS] Received WebSocket Pong frame");
-                    eprintln!("  → Payload (bytes): {:?}", payload);
-                    eprintln!("  → Payload (UTF-8): {:?}", String::from_utf8(payload.clone()));
-                }
-                Message::Close(frame) => {
-                    eprintln!("[Lighter WS] Connection closed: {:?}", frame);
-                    return Err(LighterError::InvalidResponse(format!("Connection closed by server: {:?}", frame)));
-                }
-                Message::Binary(_) => {
-                    eprintln!("[Lighter WS] Received unexpected binary message");
-                }
-                Message::Frame(_) => {
-                    // Raw frames are handled internally by tungstenite
+                    Some("update/account_all") => {
+                        if let Some(channel) = parsed.get("channel").and_then(|c| c.as_str()) {
+                            let account_id = channel.split(':').nth(1).unwrap_or("unknown");
+                            account_states
+                                .write()
+                                .await
+                                .insert(account_id.to_string(), parsed.clone());
+                            on_account_update(account_id.to_string(), parsed);
+                        }
+                    }
+                    _ => {
+                        eprintln!("Unhandled message type: {:?}", msg_type);
+                    }
                 }
             }
         }
 
-        // If we exit the loop, the connection was closed unexpectedly
-        eprintln!("[Lighter WS] WebSocket stream ended unexpectedly");
-        Err(LighterError::InvalidResponse("WebSocket stream closed unexpectedly".to_string()))
+        Ok(())
     }
 
     /// Update order book state with incremental updates
@@ -498,19 +399,9 @@ impl WsClient {
         self.order_book_states.read().await.get(market_id).cloned()
     }
 
-    /// Get current trades for a market
-    pub async fn get_trades(&self, market_id: &str) -> Option<Vec<TradeData>> {
-        self.trade_states.read().await.get(market_id).cloned()
-    }
-
     /// Get current account state
     pub async fn get_account(&self, account_id: &str) -> Option<Value> {
         self.account_states.read().await.get(account_id).cloned()
-    }
-
-    /// Get current user stats
-    pub async fn get_user_stats(&self, account_id: &str) -> Option<Value> {
-        self.user_stats_states.read().await.get(account_id).cloned()
     }
 }
 
@@ -522,9 +413,7 @@ mod tests {
     fn test_ws_client_builder() {
         let client = WsClient::builder()
             .order_books(vec![0, 1])
-            .trades(vec![0, 1])
             .accounts(vec![12345])
-            .user_stats(vec![12345])
             .build();
 
         assert!(client.is_ok());
