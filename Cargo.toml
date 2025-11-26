@@ -48,3 +48,7 @@ dotenv = "0.15"
 [lib]
 name = "lighter_rs"
 path = "src/lib.rs"
+
+[[bin]]
+name = "mm_2511"
+path = "bin/mm_2511.rs"
