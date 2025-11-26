@@ -10,7 +10,7 @@
 //! - Set LIGHTER_ACCOUNT_INDEX
 //! - Set LIGHTER_API_KEY_INDEX
 //!
-//! Run with: cargo run --example mm_vol_score
+//! Run with: cargo run --example mm_2511
 
 use lighter_rs::client::TxClient;
 use lighter_rs::ws_client::{OrderBook, WsClient};
