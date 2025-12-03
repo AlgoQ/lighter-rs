@@ -38,6 +38,7 @@ chrono = "0.4"
 # Numeric types
 num-bigint = "0.4"
 num-traits = "0.2"
+rust_decimal = { version = "1.36", features = ["serde"] }
 dotenv = "0.15"
 
 [dev-dependencies]

@@ -13,7 +13,8 @@
 
 use dotenv::dotenv;
 use lighter_rs::client::TxClient;
-use lighter_rs::ws_client::{OrderBook, WsClient};
+use lighter_rs::ws_client::{ManagedOrderBook, WsClient};
+use rust_decimal::prelude::ToPrimitive;
 use serde_json::Value;
 use std::env;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -90,119 +91,112 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tx_client_clone = tx_client.clone();
 
     // Order book callback - Market data analysis
-    let on_order_book_update = move |market_id: String, order_book: OrderBook| {
+    let on_order_book_update = move |market_id: String, order_book: &ManagedOrderBook| {
         let count = update_count_clone.fetch_add(1, Ordering::Relaxed) + 1;
 
         println!("═══ Update #{} - Market {} ═══", count, market_id);
 
-        if let (Some(best_ask), Some(best_bid)) = (order_book.asks.first(), order_book.bids.first())
+        if let (Some(best_ask), Some(best_bid)) =
+            (order_book.best_ask(), order_book.best_bid())
         {
-            if let (Ok(ask_price), Ok(bid_price)) =
-                (best_ask.price.parse::<f64>(), best_bid.price.parse::<f64>())
-            {
-                let mid_price = (ask_price + bid_price) / 2.0;
-                let spread = ask_price - bid_price;
-                let spread_bps = (spread / bid_price) * 10000.0;
+            let ask_f64 = best_ask.price.parse::<f64>().unwrap_or(0.0);
+            let bid_f64 = best_bid.price.parse::<f64>().unwrap_or(0.0);
+            let mid_price = order_book.mid_price().and_then(|m| m.to_f64()).unwrap_or(0.0);
+            let spread = order_book.spread().and_then(|s| s.to_f64()).unwrap_or(0.0);
+            let spread_bps = order_book.spread_bps().and_then(|s| s.to_f64()).unwrap_or(0.0);
 
-                println!("📊 Market Data:");
-                println!("  Best Ask: ${:.4} (Size: {})", ask_price, best_ask.size);
-                println!("  Best Bid: ${:.4} (Size: {})", bid_price, best_bid.size);
-                println!("  Mid Price: ${:.4}", mid_price);
-                println!("  Spread: ${:.4} ({:.2} bps)", spread, spread_bps);
+            println!("📊 Market Data:");
+            println!("  Best Ask: ${:.4} (Size: {})", ask_f64, best_ask.size);
+            println!("  Best Bid: ${:.4} (Size: {})", bid_f64, best_bid.size);
+            println!("  Mid Price: ${:.4}", mid_price);
+            println!("  Spread: ${:.4} ({:.2} bps)", spread, spread_bps);
 
-                // Calculate order book depth
-                let ask_depth: f64 = order_book
-                    .asks
-                    .iter()
-                    .take(5)
-                    .filter_map(|level| level.size.parse::<f64>().ok())
-                    .sum();
+            // Calculate order book depth using new helper methods
+            let ask_depth = order_book.top_asks(5).iter()
+                .map(|level| level.size.parse::<f64>().unwrap_or(0.0))
+                .sum::<f64>();
 
-                let bid_depth: f64 = order_book
-                    .bids
-                    .iter()
-                    .take(5)
-                    .filter_map(|level| level.size.parse::<f64>().ok())
-                    .sum();
+            let bid_depth = order_book.top_bids(5).iter()
+                .map(|level| level.size.parse::<f64>().unwrap_or(0.0))
+                .sum::<f64>();
 
-                println!(
-                    "  Depth (top 5): Asks {:.2} | Bids {:.2}",
-                    ask_depth, bid_depth
-                );
+            println!(
+                "  Depth (top 5): Asks {:.2} | Bids {:.2}",
+                ask_depth, bid_depth
+            );
 
-                // Track price movement
-                let last_mid_clone = last_mid_clone.clone();
-                let trade_count = trade_count_clone.clone();
-                let tx_client = tx_client_clone.clone();
+            // Track price movement
+            let last_mid_clone = last_mid_clone.clone();
+            let trade_count = trade_count_clone.clone();
+            let tx_client = tx_client_clone.clone();
 
-                tokio::spawn(async move {
-                    let mut last_mid = last_mid_clone.write().await;
+            tokio::spawn(async move {
+                let mut last_mid = last_mid_clone.write().await;
 
-                    if *last_mid > 0.0 {
-                        let price_change = mid_price - *last_mid;
-                        let price_change_pct = (price_change / *last_mid) * 100.0;
+                if *last_mid > 0.0 {
+                    let price_change = mid_price - *last_mid;
+                    let price_change_pct = (price_change / *last_mid) * 100.0;
 
+                    println!(
+                        "  📈 Price Change: ${:.4} ({:+.2}%)",
+                        price_change, price_change_pct
+                    );
+
+                    // Simple trading logic: Trade on significant price moves
+                    if price_change_pct.abs() > 0.1 && trade_count.load(Ordering::Relaxed) < 2 {
                         println!(
-                            "  📈 Price Change: ${:.4} ({:+.2}%)",
-                            price_change, price_change_pct
+                            "\n  🎯 TRADING SIGNAL: Price moved {:+.2}%",
+                            price_change_pct
                         );
 
-                        // Simple trading logic: Trade on significant price moves
-                        if price_change_pct.abs() > 0.1 && trade_count.load(Ordering::Relaxed) < 2 {
-                            println!(
-                                "\n  🎯 TRADING SIGNAL: Price moved {:+.2}%",
-                                price_change_pct
-                            );
+                        let is_ask = if price_change_pct > 0.0 { 1 } else { 0 }; // Sell if price up, buy if down
 
-                            let is_ask = if price_change_pct > 0.0 { 1 } else { 0 }; // Sell if price up, buy if down
+                        println!(
+                            "     Action: {} at ${:.4}",
+                            if is_ask == 1 { "SELL" } else { "BUY" },
+                            mid_price
+                        );
 
-                            println!(
-                                "     Action: {} at ${:.4}",
-                                if is_ask == 1 { "SELL" } else { "BUY" },
-                                mid_price
-                            );
+                        // Create small market order
+                        match tx_client
+                            .create_market_order(
+                                0,
+                                chrono::Utc::now().timestamp_millis(),
+                                50_000, // Very small size
+                                mid_price as u32,
+                                is_ask,
+                                false,
+                                None,
+                            )
+                            .await
+                        {
+                            Ok(order) => {
+                                println!("     ✓ Order signed (nonce: {})", order.nonce);
 
-                            // Create small market order
-                            match tx_client
-                                .create_market_order(
-                                    0,
-                                    chrono::Utc::now().timestamp_millis(),
-                                    50_000, // Very small size
-                                    mid_price as u32,
-                                    is_ask,
-                                    false,
-                                    None,
-                                )
-                                .await
-                            {
-                                Ok(order) => {
-                                    println!("     ✓ Order signed (nonce: {})", order.nonce);
-
-                                    match tx_client.send_transaction(&order).await {
-                                        Ok(response) => {
-                                            if response.code == 200 {
-                                                println!("     ✓ Order submitted!");
-                                                if let Some(hash) = response.tx_hash {
-                                                    println!("       Tx: {}...", &hash[..16]);
-                                                }
-                                                trade_count.fetch_add(1, Ordering::Relaxed);
-                                            } else {
-                                                println!("     ✗ Rejected: {:?}", response.message);
+                                match tx_client.send_transaction(&order).await {
+                                    Ok(response) => {
+                                        if response.code == 200 {
+                                            println!("     ✓ Order submitted!");
+                                            if let Some(hash) = response.tx_hash {
+                                                println!("       Tx: {}...", &hash[..16]);
                                             }
+                                            trade_count.fetch_add(1, Ordering::Relaxed);
+                                        } else {
+                                            println!("     ✗ Rejected: {:?}", response.message);
                                         }
-                                        Err(e) => println!("     ✗ Submit error: {}", e),
                                     }
+                                    Err(e) => println!("     ✗ Submit error: {}", e),
                                 }
-                                Err(e) => println!("     ✗ Order error: {}", e),
                             }
+                            Err(e) => println!("     ✗ Order error: {}", e),
                         }
                     }
+                }
 
-                    *last_mid = mid_price;
-                });
+                *last_mid = mid_price;
+            });
 
-                println!();
-            }
+            println!();
         }
     };
 

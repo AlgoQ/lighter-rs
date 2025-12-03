@@ -19,7 +19,8 @@
 
 use dotenv::dotenv;
 use lighter_rs::client::TxClient;
-use lighter_rs::ws_client::{OrderBook, WsClient};
+use lighter_rs::ws_client::{ManagedOrderBook, WsClient};
+use rust_decimal::prelude::ToPrimitive;
 use serde_json::Value;
 use std::env;
 use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
@@ -181,13 +182,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let order_count_clone = order_count.clone();
 
     // Order book callback with trading logic
-    let on_order_book_update = move |market_id: String, order_book: OrderBook| {
+    let on_order_book_update = move |market_id: String, order_book: &ManagedOrderBook| {
         let market_id_num: u8 = market_id.parse().unwrap_or(0);
 
         // Check circuit breaker
         let cb = circuit_breaker_clone.clone();
         let tx_client = tx_client_clone.clone();
         let order_count = order_count_clone.clone();
+
+        // Extract values we need before spawning
+        let best_ask = order_book.best_ask();
+        let best_bid = order_book.best_bid();
+        let spread = order_book.spread();
+        let spread_bps = order_book.spread_bps();
+        let mid_price = order_book.mid_price();
 
         tokio::spawn(async move {
             // Update circuit breaker state
@@ -196,21 +204,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let state = cb.state_name();
             println!("📊 Market {} | Circuit: {}", market_id, state);
 
-            if let (Some(best_ask), Some(best_bid)) =
-                (order_book.asks.first(), order_book.bids.first())
-            {
-                if let (Ok(ask_price), Ok(bid_price)) =
-                    (best_ask.price.parse::<f64>(), best_bid.price.parse::<f64>())
-                {
-                    let spread = ask_price - bid_price;
-                    let spread_bps = (spread / bid_price) * 10000.0;
-                    let mid_price = (ask_price + bid_price) / 2.0;
+            if let (Some(best_ask_level), Some(best_bid_level)) = (best_ask, best_bid) {
+                if let (Some(spread), Some(spread_bps_val), Some(mid)) = (spread, spread_bps, mid_price) {
+                    let ask_f64 = best_ask_level.price.parse::<f64>().unwrap_or(0.0);
+                    let bid_f64 = best_bid_level.price.parse::<f64>().unwrap_or(0.0);
+                    let mid_f64 = mid.to_f64().unwrap_or(0.0);
+                    let spread_bps = spread_bps_val.to_f64().unwrap_or(0.0);
 
                     println!(
                         "  Ask: {:.2} | Bid: {:.2} | Mid: {:.2}",
-                        ask_price, bid_price, mid_price
+                        ask_f64, bid_f64, mid_f64
                     );
-                    println!("  Spread: {:.4} ({:.2} bps)", spread, spread_bps);
+                    println!("  Spread: {} ({:.2} bps)", spread, spread_bps);
 
                     // Trading logic: Only trade if circuit is closed or half-open
                     if (cb.is_closed() || cb.is_half_open()) && spread_bps >= MIN_SPREAD_BPS {
@@ -230,7 +235,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     market_id_num,
                                     chrono::Utc::now().timestamp_millis(),
                                     100_000,                   // Small size for demo
-                                    (mid_price * 1.01) as u32, // 1% slippage tolerance
+                                    (mid_f64 * 1.01) as u32, // 1% slippage tolerance
                                     0,                         // BUY
                                     false,
                                     None,

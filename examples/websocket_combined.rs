@@ -7,7 +7,7 @@
 //!
 //! Run with: cargo run --example websocket_combined
 
-use lighter_rs::ws_client::{OrderBook, WsClient};
+use lighter_rs::ws_client::{ManagedOrderBook, WsClient};
 use serde_json::Value;
 use std::env;
 
@@ -40,21 +40,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Order book update callback
     let ob_counter = update_counter.clone();
-    let on_order_book_update = move |market_id: String, order_book: OrderBook| {
+    let on_order_book_update = move |market_id: String, order_book: &ManagedOrderBook| {
         let count = ob_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
         println!("📊 Order Book #{} - Market {}", count + 1, market_id);
 
-        if let (Some(best_ask), Some(best_bid)) = (order_book.asks.first(), order_book.bids.first())
-        {
+        if let (Some(best_ask), Some(best_bid)) = (order_book.best_ask(), order_book.best_bid()) {
             println!("  Best Ask: {} @ {}", best_ask.size, best_ask.price);
             println!("  Best Bid: {} @ {}", best_bid.size, best_bid.price);
 
-            if let (Ok(ask), Ok(bid)) =
-                (best_ask.price.parse::<f64>(), best_bid.price.parse::<f64>())
-            {
-                let mid = (ask + bid) / 2.0;
-                println!("  Mid Price: {:.2}", mid);
+            if let Some(mid) = order_book.mid_price() {
+                println!("  Mid Price: {}", mid);
             }
         }
         println!();

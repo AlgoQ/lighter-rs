@@ -16,7 +16,8 @@
 //! Run with: cargo run --example trading_bot_simple
 
 use lighter_rs::client::TxClient;
-use lighter_rs::ws_client::{OrderBook, WsClient};
+use lighter_rs::ws_client::{ManagedOrderBook, WsClient};
+use rust_decimal::prelude::ToPrimitive;
 use serde_json::Value;
 use std::env;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -85,68 +86,64 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let order_placed_clone = order_placed.clone();
 
     // Order book callback - Simple trading logic
-    let on_order_book_update = move |market_id: String, order_book: OrderBook| {
+    let on_order_book_update = move |market_id: String, order_book: &ManagedOrderBook| {
         println!("📊 Order Book Update - Market {}", market_id);
 
-        if let (Some(best_ask), Some(best_bid)) = (order_book.asks.first(), order_book.bids.first())
+        if let (Some(best_ask), Some(best_bid)) =
+            (order_book.best_ask(), order_book.best_bid())
         {
             println!("  Best Ask: {} @ {}", best_ask.size, best_ask.price);
             println!("  Best Bid: {} @ {}", best_bid.size, best_bid.price);
 
-            // Parse prices
-            if let (Ok(ask_price), Ok(bid_price)) =
-                (best_ask.price.parse::<f64>(), best_bid.price.parse::<f64>())
-            {
-                let spread = ask_price - bid_price;
-                let spread_bps = (spread / bid_price) * 10000.0;
+            // Get spread using new helper methods
+            let ask_f64 = best_ask.price.parse::<f64>().unwrap_or(0.0);
+            let bid_f64 = best_bid.price.parse::<f64>().unwrap_or(0.0);
+            let spread_bps = order_book.spread_bps().and_then(|s| s.to_f64()).unwrap_or(0.0);
 
-                println!("  Spread: {:.2} ({:.2} bps)", spread, spread_bps);
+            println!("  Spread: {:.2} bps", spread_bps);
 
-                // Simple trading logic: Place order if spread > 10 bps
-                if spread_bps > 10.0 && !order_placed_clone.load(Ordering::Relaxed) {
-                    println!("\n  🎯 Spread > 10 bps detected! Placing order...");
+            // Simple trading logic: Place order if spread > 10 bps
+            if spread_bps > 10.0 && !order_placed_clone.load(Ordering::Relaxed) {
+                println!("\n  🎯 Spread > 10 bps detected! Placing order...");
 
-                    let tx_client = tx_client_clone.clone();
-                    let order_placed = order_placed_clone.clone();
+                let tx_client = tx_client_clone.clone();
+                let order_placed = order_placed_clone.clone();
+                let mid_price = ((ask_f64 + bid_f64) / 2.0) as u32;
 
-                    // Spawn task to place order (non-blocking)
-                    tokio::spawn(async move {
-                        // Place a small buy order at mid price
-                        let mid_price = ((ask_price + bid_price) / 2.0) as u32;
-
-                        match tx_client
-                            .create_market_order(
-                                market_index,
-                                chrono::Utc::now().timestamp_millis(),
-                                100_000, // Small size for demo
-                                mid_price,
-                                0,     // BUY
-                                false, // not reduce-only
-                                None,
-                            )
-                            .await
-                        {
-                            Ok(order) => {
-                                println!("  ✓ Order created and signed");
-                                match tx_client.send_transaction(&order).await {
-                                    Ok(response) => {
-                                        if response.code == 200 {
-                                            println!("  ✓ Order submitted successfully!");
-                                            if let Some(hash) = response.tx_hash {
-                                                println!("    Tx Hash: {}", hash);
-                                            }
-                                            order_placed.store(true, Ordering::Relaxed);
-                                        } else {
-                                            println!("  ✗ Order failed: {:?}", response.message);
+                // Spawn task to place order (non-blocking)
+                tokio::spawn(async move {
+                    match tx_client
+                        .create_market_order(
+                            market_index,
+                            chrono::Utc::now().timestamp_millis(),
+                            100_000, // Small size for demo
+                            mid_price,
+                            0,     // BUY
+                            false, // not reduce-only
+                            None,
+                        )
+                        .await
+                    {
+                        Ok(order) => {
+                            println!("  ✓ Order created and signed");
+                            match tx_client.send_transaction(&order).await {
+                                Ok(response) => {
+                                    if response.code == 200 {
+                                        println!("  ✓ Order submitted successfully!");
+                                        if let Some(hash) = response.tx_hash {
+                                            println!("    Tx Hash: {}", hash);
                                         }
+                                        order_placed.store(true, Ordering::Relaxed);
+                                    } else {
+                                        println!("  ✗ Order failed: {:?}", response.message);
                                     }
-                                    Err(e) => println!("  ✗ Submit error: {}", e),
                                 }
+                                Err(e) => println!("  ✗ Submit error: {}", e),
                             }
-                            Err(e) => println!("  ✗ Order creation error: {}", e),
                         }
-                    });
-                }
+                        Err(e) => println!("  ✗ Order creation error: {}", e),
+                    }
+                });
             }
         }
         println!();

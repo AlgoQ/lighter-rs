@@ -10,7 +10,7 @@
 //!
 //! Run with: cargo run --example websocket_account
 
-use lighter_rs::ws_client::WsClient;
+use lighter_rs::ws_client::{ManagedOrderBook, WsClient};
 use serde_json::Value;
 use std::env;
 
@@ -40,8 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()?;
 
     // Placeholder for order book updates (not used in this example)
-    let on_order_book_update =
-        |_market_id: String, _order_book: lighter_rs::ws_client::OrderBook| {};
+    let on_order_book_update = |_market_id: String, _order_book: &ManagedOrderBook| {};
 
     // Define callback for account updates
     let on_account_update = move |account_id: String, account_data: Value| {

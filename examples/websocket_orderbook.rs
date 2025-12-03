@@ -7,7 +7,7 @@
 //!
 //! Run with: cargo run --example websocket_orderbook
 
-use lighter_rs::ws_client::{OrderBook, WsClient};
+use lighter_rs::ws_client::{ManagedOrderBook, WsClient};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -25,42 +25,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Subscriptions: markets 0, 1\n");
 
     // Define callback for order book updates
-    let on_order_book_update = |market_id: String, order_book: OrderBook| {
+    let on_order_book_update = |market_id: String, order_book: &ManagedOrderBook| {
         println!("═══ Order Book Update: Market {} ═══", market_id);
+        println!("  Offset: {} | Timestamp: {}", order_book.offset, order_book.timestamp);
 
-        // Display top 5 asks
+        // Display top 5 asks using new helper methods
         println!("\n  📈 Top 5 Asks (Sell Orders):");
-        for (i, ask) in order_book.asks.iter().take(5).enumerate() {
+        for (i, level) in order_book.top_asks(5).iter().enumerate() {
             println!(
                 "    {}. Price: {:>12} | Size: {:>12}",
                 i + 1,
-                ask.price,
-                ask.size
+                level.price,
+                level.size
             );
         }
 
-        // Display top 5 bids
+        // Display top 5 bids using new helper methods
         println!("\n  📉 Top 5 Bids (Buy Orders):");
-        for (i, bid) in order_book.bids.iter().take(5).enumerate() {
+        for (i, level) in order_book.top_bids(5).iter().enumerate() {
             println!(
                 "    {}. Price: {:>12} | Size: {:>12}",
                 i + 1,
-                bid.price,
-                bid.size
+                level.price,
+                level.size
             );
         }
 
-        // Calculate spread
-        if let (Some(best_ask), Some(best_bid)) = (order_book.asks.first(), order_book.bids.first())
-        {
-            if let (Ok(ask_price), Ok(bid_price)) =
-                (best_ask.price.parse::<f64>(), best_bid.price.parse::<f64>())
-            {
-                let spread = ask_price - bid_price;
-                let spread_bps = (spread / bid_price) * 10000.0;
-                println!("\n  💰 Spread: {:.2} ({:.2} bps)", spread, spread_bps);
+        // Use new helper methods for spread calculation
+        if let Some(spread_bps) = order_book.spread_bps() {
+            if let Some(spread) = order_book.spread() {
+                println!("\n  💰 Spread: {} ({:.2} bps)", spread, spread_bps);
             }
         }
+
+        // Display order book depth info
+        println!("  📊 Depth: {} asks, {} bids", order_book.ask_depth(), order_book.bid_depth());
+        println!("  📊 Volume: {} total asks, {} total bids",
+            order_book.total_ask_volume(), order_book.total_bid_volume());
 
         println!("\n{}\n", "─".repeat(50));
     };
